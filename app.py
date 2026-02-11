@@ -2,32 +2,21 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import io
 import zipfile
 
+# ページ設定
 st.set_page_config(page_title="利用明細ジェネレーター", layout="wide")
-
-# UIカスタマイズ
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    [data-testid="stMetric"] {
-        background-color: #ffffff; border: 2px solid #333; padding: 20px !important;
-        border-radius: 8px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
 st.title("💳 クレジットカード利用明細ジェネレーター")
 
-# --- 設定エリア ---
+# --- サイドバー設定 ---
 with st.sidebar:
     st.header("⚙️ 出力設定")
     now = datetime.now()
+    # 選択肢の作成
     month_options = [(now - relativedelta(months=i)).strftime("%Y-%m") for i in range(24)]
     
     start_month_str = st.selectbox("開始月", month_options, index=5)
@@ -36,75 +25,72 @@ with st.sidebar:
     st.divider()
     user_name = st.text_input("カード会員名", "SAMPLE USER")
 
-# 日付計算
+# 日付オブジェクトに変換
 start_dt = datetime.strptime(start_month_str, "%Y-%m")
 end_dt = datetime.strptime(end_month_str, "%Y-%m")
 
+# エラーチェック
 if start_dt > end_dt:
-    st.error("エラー：開始月は終了月より前の月を選択してください。")
+    st.error("開始月は終了月より前の月を選択してください。")
 else:
-    # 1. データの生成
-    merchants = [
-        ("ｱﾏｿﾞﾝ ｼﾞﾔﾊﾟﾝ", "ｼｮｯﾋﾟﾝｸﾞ"), ("ｽﾀｰﾊﾞｯｸｽ ｺｰﾋｰ", "飲食"), ("JR東日本 ﾓﾊﾞｲﾙｽｲｶ", "交通"),
-        ("ｱﾂﾌﾟﾙﾄﾞﾂﾄｺﾑ", "ｻﾌﾞｽｸ"), ("ｾﾌﾞﾝ-ｲﾚﾌﾞﾝ", "ｺﾝﾋﾞﾆ"), ("ﾆﾂﾎﾟﾝ ﾚﾝﾀｶｰ", "旅行")
-    ]
-
+    # 1. 対象月のリスト作成
     target_months = []
-    curr = start_dt
-    while curr <= end_dt:
-        target_months.append(curr)
-        curr += relativedelta(months=1)
+    temp_dt = start_dt
+    while temp_dt <= end_dt:
+        target_months.append(temp_dt)
+        temp_dt += relativedelta(months=1)
 
-    all_monthly_data = {}
-    total_amt = 0
+    # マスターデータ
+    merchants = ["ｱﾏｿﾞﾝ ｼﾞﾔﾊﾟﾝ", "ｽﾀｰﾊﾞｯｸｽ", "JR東日本 ｽｲｶ", "ｱﾂﾌﾟﾙﾄﾞﾂﾄｺﾑ", "ｾﾌﾞﾝ-ｲﾚﾌﾞﾝ", "Uber Eats"]
 
-    for m in target_months:
-        num_tx = random.randint(10, 20)
-        items = []
-        for _ in range(num_tx):
-            day = random.randint(1, 28)
-            tx_date = m + timedelta(days=day-1)
-            merchant, _ = random.choice(merchants)
-            amt = random.randint(500, 30000)
-            items.append({
-                "利用日": tx_date.strftime("%Y/%m/%d"),
-                "利用先": merchant,
-                "金額（円）": amt,
-                "備考": ""
-            })
-            total_amt += amt
-        
-        df_m = pd.DataFrame(items).sort_values("利用日")
-        # 合計行の追加
-        subtotal = pd.DataFrame([{"利用日": "---", "利用先": "【合計】", "金額（円）": df_m["金額（円）"].sum(), "備考": ""}])
-        all_monthly_data[m.strftime("%Y-%m")] = pd.concat([df_m, subtotal], ignore_index=True)
-
-    # 2. 画面表示
-    c1, c2 = st.columns(2)
-    c1.metric("選択期間の総額", f"¥{total_amt:,}")
-    c2.metric("生成月数", f"{len(target_months)}ヶ月分")
-
-    st.divider()
-
-    # 3. ZIPファイルの作成（ここを修正しました）
+    # 2. データ生成とZIP準備
     zip_buffer = io.BytesIO()
+    total_all_months = 0
+    
+    # メモリ上にZIPを作成
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for m_str, df_target in all_monthly_data.items():
-            # プレビュー表示
-            with st.expander(f"📂 {m_str} の明細を確認"):
-                st.dataframe(df_target, use_container_width=True)
+        for m in target_months:
+            m_str = m.strftime("%Y-%m")
+            num_tx = random.randint(8, 15)
+            rows = []
+            month_sum = 0
             
-            # 各月のCSVをZIPに追加
-            csv_data = df_target.to_csv(index=False).encode('utf-8-sig')
+            for _ in range(num_tx):
+                day = random.randint(1, 28)
+                tx_date = m + timedelta(days=day-1)
+                amt = random.randint(500, 20000)
+                rows.append({
+                    "利用日": tx_date.strftime("%Y/%m/%d"),
+                    "利用先": random.choice(merchants),
+                    "金額（円）": amt
+                })
+                month_sum += amt
+            
+            # 月ごとのDF作成
+            df_m = pd.DataFrame(rows).sort_values("利用日")
+            # 合計行を追加
+            subtotal = pd.DataFrame([{"利用日": "---", "利用先": "【合計】", "金額（円）": month_sum}])
+            df_final = pd.concat([df_m, subtotal], ignore_index=True)
+            
+            # 画面表示用のプレビュー
+            with st.expander(f"📂 {m_str} の明細プレビュー"):
+                st.dataframe(df_final, use_container_width=True)
+            
+            # CSVをZIPに書き込み
+            csv_data = df_final.to_csv(index=False).encode('utf-8-sig')
             zf.writestr(f"statement_{m_str}.csv", csv_data)
+            
+            total_all_months += month_sum
 
     st.divider()
-
-    # 4. ダウンロードボタン
+    
+    # 3. 統計とダウンロード
+    st.metric("選択期間の総利用額", f"¥{total_all_months:,}")
+    
     st.download_button(
-        label="📩 全月分の明細（ZIP形式）をダウンロード",
+        label="📩 全月分の明細（ZIP形式）を一括ダウンロード",
         data=zip_buffer.getvalue(),
-        file_name=f"credit_card_data_{datetime.now().strftime('%Y%m%d')}.zip",
+        file_name=f"card_statements_{datetime.now().strftime('%Y%m%d')}.zip",
         mime="application/zip",
         use_container_width=True
     )
